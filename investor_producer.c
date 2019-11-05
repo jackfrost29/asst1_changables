@@ -14,7 +14,7 @@
  *
  */
 
-extern struct semaphore *print_sem;
+
 extern struct item *req_serv_item;
 extern struct bankdata bank_account[NBANK];
 extern long int customer_spending_amount[NCUSTOMER];
@@ -23,8 +23,8 @@ extern long int producer_income[NPRODUCER];
 
 long int customer_order_count[NCUSTOMER];
 long int total_order_amount = NCUSTOMER*N_ITEM_TYPE * 10;
-static struct semaphore *sem_item, *sem_order_ready[NCUSTOMER], *sem_cust_ord_calc[NCUSTOMER], *sem_bank[NBANK], *sem_non_empty_order;
-static struct semaphore *sem_tot_ord_count_check;
+static struct semaphore *sem_item, *sem_order_ready[NCUSTOMER], *sem_cust_ord_calc[NCUSTOMER], *sem_bank[NBANK], *sem_non_empty_order, *sem_tot_ord;
+
 
 
 /*
@@ -54,10 +54,7 @@ void insert(struct item *temp, struct item *ptr){
 void order_item(void *itm){
 	P(sem_item);
 	
-	int var_1=0;
-	
-	if(req_serv_item == NULL || noOrderLeft() == 1)
-		var_1 = 1;
+	int var_1 = noOrderLeft();
 
 	struct item *temp = req_serv_item;
 	struct item *order_itm_arr_ptr = itm;
@@ -91,15 +88,15 @@ void order_item(void *itm){
 	
 	temp->next = NULL;
 	
-	V(sem_item);
 	if(var_1 == 1)
 		V(sem_non_empty_order);
+	
+	V(sem_item);
 }
 
 
 // print the whole queue for debug reason
 void printQueue(){
-	P(print_sem);
 	struct item *ptr = req_serv_item;
 	kprintf("Request serv queue details");
 	long int i=1;
@@ -108,7 +105,6 @@ void printQueue(){
 		i++;
 		ptr = ptr->next;
 	}
-	V(print_sem);
 }
 
 long int noOrderLeft(){
@@ -132,9 +128,10 @@ long int noOrderLeft(){
  **/
 void consume_item(long customernum){
 	P(sem_order_ready[customernum]);
-	//kprintf("prepared order will now be consumed\n");
+	
+	// customer will get a hold of the item only when the item is ready for him/her
 	P(sem_item);
-	//printQueue();	// this line is for debugging purpose
+	
 	struct item *prev = NULL, *del = req_serv_item;
 	while(del != NULL){
 		if(del->requestedBy == customernum){
@@ -210,20 +207,17 @@ void insert_order(struct order *temp, struct item *ptr){
 
 
 void *take_order(){
-	/*
-	if(req_serv_item == NULL && total_order_amount <= 0){
-		return NULL;
-	}
-	*/
 	
-	P(sem_tot_ord_count_check);
+	// need a fix here
+	P(sem_tot_ord);
 	if(total_order_amount <= 0){
-		V(sem_tot_ord_count_check);
+		V(sem_tot_ord);
 		return NULL;
 	}
-	V(sem_tot_ord_count_check);
 	
-	P(sem_non_empty_order);
+	P(sem_non_empty_order);	// order still remains, but need checking if available currently
+	
+	// producer will get hold of the item only when he can surely take order
 	P(sem_item);
 	
 	
@@ -258,18 +252,22 @@ void *take_order(){
 		
 		
 	}
-	
-	long int flag = 1;
+	long int flag = 0;
 	temp = req_serv_item;
 	while(temp->next != NULL){
-		if(temp->order_type == REQUEST)
-			flag = 0;
+		if(temp->order_type == REQUEST){
+			flag = 1;	// request service queue is not empty, sem lock can be opened
+			break;
+		}
 		temp = temp->next;
 	}
 	
-	V(sem_item);
-	if(flag == 0)	// request service queue is not empty, sem lock can be opened
+	V(sem_tot_ord);
+	if(flag == 1)
 		V(sem_non_empty_order);
+	V(sem_item);
+	
+	
 
 	return order_list;
 }
@@ -388,7 +386,7 @@ void loan_reimburse(void * loan,unsigned long producernumber){
 
 void initialize(){
 	//kfree(NULL);
-	print_sem = sem_create("semaphore for printing", 1);	// debug
+	//print_sem = sem_create("semaphore for printing", 1);	// debug
 	req_serv_item = NULL;	// initially the service queue is empty, it's not rocket science
 	sem_item = sem_create("request service item sem", 1);
 	for(int i=0; i<NBANK; i++){
@@ -400,10 +398,12 @@ void initialize(){
 		sem_order_ready[i] = sem_create("order of individual customer", 0);
 		customer_spending_amount[i] = 0;
 	}
-	for(int i=0; i<NPRODUCER; i++)
+	for(int i=0; i<NPRODUCER; i++){
 		producer_income[i] = 0;
+	}
+	
 	sem_non_empty_order = sem_create("semaphore to check if service queue is not empty", 0);	// initially service queue is empty
-	sem_tot_ord_count_check = sem_create("semaphore to check total amount of order", 1);
+	sem_tot_ord = sem_create("semaphore to check total amount of order", 1);
 	
 }
 
@@ -415,8 +415,9 @@ void initialize(){
  */
 
 void finish(){
-	sem_destroy(sem_tot_ord_count_check);
-	sem_destroy(print_sem);
+	sem_destroy(sem_tot_ord);
+	//sem_destroy(print_sem);
+	sem_destroy(sem_non_empty_order);
 	sem_destroy(sem_item);
 	for(int i=0; i<NBANK; i++){
 		sem_destroy(sem_bank[i]);
