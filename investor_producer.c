@@ -24,6 +24,7 @@ extern long int producer_income[NPRODUCER];
 long int customer_order_count[NCUSTOMER];
 long int total_order_amount = NCUSTOMER*N_ITEM_TYPE * 10;
 static struct semaphore *sem_item, *sem_order_ready[NCUSTOMER], *sem_cust_ord_calc[NCUSTOMER], *sem_bank[NBANK], *sem_non_empty_order;
+static struct semaphore *sem_tot_ord_count_check;
 
 
 /*
@@ -52,20 +53,27 @@ void insert(struct item *temp, struct item *ptr){
 
 void order_item(void *itm){
 	P(sem_item);
-	P(print_sem);
-	//kprintf("order item start");
-	V(print_sem);
+	
+	int var_1=0;
+	
+	if(req_serv_item == NULL || noOrderLeft() == 1)
+		var_1 = 1;
+
 	struct item *temp = req_serv_item;
 	struct item *order_itm_arr_ptr = itm;
 	
-	if(req_serv_item == NULL || noOrderLeft() == 1){
-		V(sem_non_empty_order);
+	
+	// you are not inserting at the end of the list, you ae inserting at the very first, so the previous items are getting lost
+	// fix it 
+	
+	if(temp != NULL){
+		while(temp->next != NULL){
+			temp = temp->next;
+		}
 	}
 	
-	
-	
 	for(long int i=0; i<N_ITEM_TYPE; i++, order_itm_arr_ptr++){
-		if(temp == NULL){
+		if(temp == NULL){	// insert on the head
 			insert_head(order_itm_arr_ptr);
 			temp = req_serv_item;
 		}
@@ -76,56 +84,18 @@ void order_item(void *itm){
 		// now temp is pointing to the newly added item
 		temp->i_price = temp->item_quantity*ITEM_PRICE;
 		temp->order_type = REQUEST;
-		//total_order_amount--;	// this instruction will be executed in take order function
+		
 		customer_order_count[temp->requestedBy]++;
 			
 	}
-	/*
-	if(temp!= NULL){	// iterate at the end of the list
-		while(temp->next != NULL)
-			temp = temp->next;
-	}
-	
-	else{
-		req_serv_item = order_itm_arr_ptr;
-		req_serv_item->i_price = order_itm_arr_ptr->item_quantity * ITEM_PRICE;	// the price of orde is set here
-		order_itm_arr_ptr->order_type = REQUEST;	// order type is set here
-		i++;					// number of remaining orders to be added to the service queue is now one less.
-		total_order_amount--;	// total remaining order will decrease
-		temp = req_serv_item;	// temp points to the end of service queue, in this case to the head
-		order_itm_arr_ptr++;	// now it points to the next order in the array
-		customer_order_count[req_serv_item->requestedBy]++;	// does not need semaphore, only one customer access at a time
-	}
-	for(; i<N_ITEM_TYPE; i++){
-		temp->next = order_itm_arr_ptr;	// one order added to the service queue
-		order_itm_arr_ptr->i_price = order_itm_arr_ptr->item_quantity * ITEM_PRICE;	// the price of orde is set here
-		order_itm_arr_ptr->order_type = REQUEST;	// order type is set here
-		total_order_amount--;
-		temp = temp->next;
-		order_itm_arr_ptr++;	// now it points to the next order in the array
-		customer_order_count[temp->next->requestedBy]++;	// does not need semaphore, only one customer access at a time
-	}
-	*/
-	
 	
 	temp->next = NULL;
-	//printQueue();	// for debug reasons
 	
-	P(print_sem);
-	//kprintf("order item finish");
-	V(print_sem);
 	V(sem_item);
+	if(var_1 == 1)
+		V(sem_non_empty_order);
 }
 
-/*
- * struct item{ 			// customer order/producer when serve/produce
-    unsigned int item_quantity; // quantity intended to purchase by a customer; 1 to MAX_ITEM_BUY or amount of item produced
-    unsigned int  i_price; 	// item-unit price; given as ITEM_PRICE
-    unsigned long int servBy;	// producer id
-    long int requestedBy; 	// customer id
-    unsigned int order_type;	// REQUEST or SERVICE in the order queue
-    struct item *next;		// Link to next order	
-};*/
 
 // print the whole queue for debug reason
 void printQueue(){
@@ -162,7 +132,7 @@ long int noOrderLeft(){
  **/
 void consume_item(long customernum){
 	P(sem_order_ready[customernum]);
-	kprintf("prepared order will now be consumed\n");
+	//kprintf("prepared order will now be consumed\n");
 	P(sem_item);
 	//printQueue();	// this line is for debugging purpose
 	struct item *prev = NULL, *del = req_serv_item;
@@ -245,11 +215,18 @@ void *take_order(){
 		return NULL;
 	}
 	*/
-	if(total_order_amount <= 0)
+	
+	P(sem_tot_ord_count_check);
+	if(total_order_amount <= 0){
+		V(sem_tot_ord_count_check);
 		return NULL;
-
+	}
+	V(sem_tot_ord_count_check);
+	
 	P(sem_non_empty_order);
 	P(sem_item);
+	
+	
 	struct item *temp = req_serv_item;
 	struct order *order_list = NULL, *temp_order_list = NULL;
 	long int count = 0;
@@ -281,31 +258,7 @@ void *take_order(){
 		
 		
 	}
-	/*
-	while(count --){
-		if(temp->order_type == REQUEST){
-			if(temp_order_list == NULL){	// no order adder to the order list as of yet
-				order_list = (void *)kmalloc(sizeof(struct order));
-				order_list->prev = NULL;
-				order_list->next = NULL;
-				order_list->ptr = temp;
-				temp_order_list = order_list;
-			}
-			else{
-				temp_order_list->next = (void*)kmalloc(sizeof(struct order));
-				temp_order_list->next->ptr = temp;
-				temp_order_list->next->prev = temp_order_list;
-				temp_order_list = temp_order_list->next;
-			}
-			
-			temp->order_type = SERVICED;	// so that no other producer can take the order
-			temp = temp->next;
-		}
-		else
-			count++;
-	}
-	temp_order_list->next = NULL;
-	*/
+	
 	long int flag = 1;
 	temp = req_serv_item;
 	while(temp->next != NULL){
@@ -313,6 +266,7 @@ void *take_order(){
 			flag = 0;
 		temp = temp->next;
 	}
+	
 	V(sem_item);
 	if(flag == 0)	// request service queue is not empty, sem lock can be opened
 		V(sem_non_empty_order);
@@ -349,7 +303,7 @@ void serve_order(void *p,unsigned long producernumber){
 		customer_order_count[temp->ptr->requestedBy]--;
 		customer_spending_amount[temp->ptr->requestedBy] += price;	// needs semaphore, cause multiple producer can serve the same consumer simultaneously
 		if(customer_order_count[temp->ptr->requestedBy] <= 0){
-			kprintf("Customer order is prepared\n");
+			//kprintf("Customer order is prepared\n");
 			V(sem_order_ready[temp->ptr->requestedBy]);
 		}
 		V(sem_cust_ord_calc[temp->ptr->requestedBy]);
@@ -405,16 +359,15 @@ void loan_reimburse(void * loan,unsigned long producernumber){
 	(void)loan;
 	for(int i=0; i<NBANK; i++){
 		P(sem_bank[i]);
-		
-		if(bank_account[i].prod_loan[producernumber] > 0){
-			int ret = bank_account[i].prod_loan[producernumber] + (bank_account[i].prod_loan[producernumber] * BANK_INTEREST / 100);
-			int interest = ret - bank_account[i].prod_loan[producernumber];
-			bank_account[i].remaining_cash += ret;
+		int loan = bank_account[i].prod_loan[producernumber];
+		if(loan > 0){
+			int interest = (loan * BANK_INTEREST) / 100;
+			int ret = loan + interest;
+			bank_account[i].acu_loan_amount += loan;
 			bank_account[i].interest_amount += interest;
-			producer_income[producernumber] -= bank_account[i].prod_loan[producernumber];	// no semaphore, only one at a time
+			producer_income[producernumber] -= ret;	// no semaphore, only one at a time
 			bank_account[i].prod_loan[producernumber] = 0;
 		}
-		
 		V(sem_bank[i]);
 	}
 }
@@ -450,6 +403,7 @@ void initialize(){
 	for(int i=0; i<NPRODUCER; i++)
 		producer_income[i] = 0;
 	sem_non_empty_order = sem_create("semaphore to check if service queue is not empty", 0);	// initially service queue is empty
+	sem_tot_ord_count_check = sem_create("semaphore to check total amount of order", 1);
 	
 }
 
@@ -461,6 +415,7 @@ void initialize(){
  */
 
 void finish(){
+	sem_destroy(sem_tot_ord_count_check);
 	sem_destroy(print_sem);
 	sem_destroy(sem_item);
 	for(int i=0; i<NBANK; i++){

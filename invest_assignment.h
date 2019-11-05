@@ -19,8 +19,8 @@
  * Note: in os161 -- currently you cannot use double, no coprocessor is available
  */
 #define NBANK    3 		// number of bank
-#define NPRODUCER   1 		// number of producer
-#define NCUSTOMER 1 		// number of customer
+#define NPRODUCER   10 		// number of producer
+#define NCUSTOMER 10 		// number of customer
 #define BANK_INTEREST 5 	/* Bank interest in percent */
 #define PRODUCT_PROFIT 10 	/* profit in percent -- must be added to the item price*/
 #define BAC_CASH 100000000 	// Cash for investment
